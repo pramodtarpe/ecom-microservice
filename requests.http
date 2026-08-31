@@ -1,15 +1,147 @@
-### Product catalog
-GET http://localhost:8081/api/products
+@authBaseUrl = http://localhost:8084
+@productBaseUrl = http://localhost:8081
+@inventoryBaseUrl = http://localhost:8082
+@orderBaseUrl = http://localhost:8083
+@adminEmail = admin@example.com
+@adminPassword = ChangeMeAdmin123!
+@userEmail = user@example.com
+@userPassword = ChangeMeUser123!
+@correlationId = manual-order-001
 
-### Inventory
-GET http://localhost:8082/api/inventory/SKU-LAPTOP
-
-### Place an order (catalog prices are authoritative; inventory is reserved)
-POST http://localhost:8083/api/orders
+### Register a new USER (201 once; rerunning the same email returns 409)
+# @name registerUser
+POST {{authBaseUrl}}/api/auth/register
 Content-Type: application/json
+X-Correlation-ID: manual-register-001
 
 {
-  "customerEmail": "buyer@example.com",
+  "email": "new.user@example.com",
+  "displayName": "New User",
+  "password": "NewUserPass123!"
+}
+
+### Login as seeded USER
+# @name userLogin
+POST {{authBaseUrl}}/api/auth/login
+Content-Type: application/json
+X-Correlation-ID: manual-user-login-001
+
+{
+  "email": "{{userEmail}}",
+  "password": "{{userPassword}}"
+}
+
+> {% client.global.set("userToken", response.body.accessToken); %}
+
+### Login as seeded ADMIN
+# @name adminLogin
+POST {{authBaseUrl}}/api/auth/login
+Content-Type: application/json
+X-Correlation-ID: manual-admin-login-001
+
+{
+  "email": "{{adminEmail}}",
+  "password": "{{adminPassword}}"
+}
+
+> {% client.global.set("adminToken", response.body.accessToken); %}
+
+### Current user profile
+GET {{authBaseUrl}}/api/users/me
+Authorization: Bearer {{userToken}}
+X-Correlation-ID: manual-user-me-001
+
+### Admin: page through users
+GET {{authBaseUrl}}/api/admin/users?page=0&size=20
+Authorization: Bearer {{adminToken}}
+X-Correlation-ID: manual-admin-users-001
+
+### Anonymous product access should return 401 Problem Details
+GET {{productBaseUrl}}/api/products
+X-Correlation-ID: manual-anonymous-001
+
+### USER: browse products
+GET {{productBaseUrl}}/api/products
+Authorization: Bearer {{userToken}}
+X-Correlation-ID: manual-products-001
+
+### USER: product creation should return 403 Problem Details
+POST {{productBaseUrl}}/api/products
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+X-Correlation-ID: manual-user-forbidden-001
+
+{
+  "sku": "SKU-FORBIDDEN",
+  "name": "Must Not Be Created",
+  "description": "A USER cannot create products",
+  "price": 1.00,
+  "active": true
+}
+
+### ADMIN: create a product
+# @name createProduct
+POST {{productBaseUrl}}/api/products
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+X-Correlation-ID: manual-product-create-001
+
+{
+  "sku": "SKU-KEYBOARD",
+  "name": "Mechanical Keyboard",
+  "description": "Hot-swappable mechanical keyboard",
+  "price": 89.99,
+  "active": true
+}
+
+### ADMIN: replace the created product
+PUT {{productBaseUrl}}/api/products/{{createProduct.response.body.$.id}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+X-Correlation-ID: manual-product-update-001
+
+{
+  "sku": "SKU-KEYBOARD",
+  "name": "Mechanical Keyboard Pro",
+  "description": "Hot-swappable keyboard with updated catalog copy",
+  "price": 99.99,
+  "active": true
+}
+
+### USER: direct inventory access should return 403
+GET {{inventoryBaseUrl}}/api/inventory/SKU-LAPTOP
+Authorization: Bearer {{userToken}}
+X-Correlation-ID: manual-inventory-forbidden-001
+
+### ADMIN: create matching stock for the new product
+POST {{inventoryBaseUrl}}/api/inventory
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+X-Correlation-ID: manual-inventory-create-001
+
+{
+  "sku": "SKU-KEYBOARD",
+  "availableQuantity": 25
+}
+
+### ADMIN: update available stock
+PUT {{inventoryBaseUrl}}/api/inventory/SKU-KEYBOARD
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+X-Correlation-ID: manual-inventory-update-001
+
+{
+  "availableQuantity": 30
+}
+
+### USER: place an order (identity comes from JWT; catalog prices are authoritative)
+# @name createOrder
+POST {{orderBaseUrl}}/api/orders
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+X-Correlation-ID: {{correlationId}}
+
+{
   "items": [
     {
       "sku": "SKU-LAPTOP",
@@ -22,26 +154,96 @@ Content-Type: application/json
   ]
 }
 
-### List orders
-GET http://localhost:8083/api/orders
+### USER: list only own orders
+GET {{orderBaseUrl}}/api/orders
+Authorization: Bearer {{userToken}}
+X-Correlation-ID: manual-user-orders-001
 
-### Create a product
-POST http://localhost:8081/api/products
+### USER: get own order
+GET {{orderBaseUrl}}/api/orders/{{createOrder.response.body.$.id}}
+Authorization: Bearer {{userToken}}
+X-Correlation-ID: manual-user-order-001
+
+### ADMIN: list every order
+GET {{orderBaseUrl}}/api/orders
+Authorization: Bearer {{adminToken}}
+X-Correlation-ID: manual-admin-orders-001
+
+### USER: create a second order for ADMIN to inspect and cancel
+# @name createOrderForAdminCancel
+POST {{orderBaseUrl}}/api/orders
+Authorization: Bearer {{userToken}}
 Content-Type: application/json
+X-Correlation-ID: manual-admin-cancel-setup-001
 
 {
-  "sku": "SKU-KEYBOARD",
-  "name": "Mechanical Keyboard",
-  "description": "Hot-swappable mechanical keyboard",
-  "price": 89.99,
-  "active": true
+  "items": [
+    {
+      "sku": "SKU-HEADPHONES",
+      "quantity": 1
+    }
+  ]
 }
 
-### Create matching stock
-POST http://localhost:8082/api/inventory
+### ADMIN: get another user's order
+GET {{orderBaseUrl}}/api/orders/{{createOrderForAdminCancel.response.body.$.id}}
+Authorization: Bearer {{adminToken}}
+X-Correlation-ID: manual-admin-order-001
+
+### ADMIN: cancel another user's order
+POST {{orderBaseUrl}}/api/orders/{{createOrderForAdminCancel.response.body.$.id}}/cancel
+Authorization: Bearer {{adminToken}}
+X-Correlation-ID: manual-admin-order-cancel-001
+
+### USER: validation error should return 400 Problem Details
+POST {{orderBaseUrl}}/api/orders
+Authorization: Bearer {{userToken}}
 Content-Type: application/json
+X-Correlation-ID: manual-validation-001
 
 {
-  "sku": "SKU-KEYBOARD",
-  "availableQuantity": 25
+  "items": []
 }
+
+### USER: cancel own order and release its reservations
+POST {{orderBaseUrl}}/api/orders/{{createOrder.response.body.$.id}}/cancel
+Authorization: Bearer {{userToken}}
+X-Correlation-ID: manual-order-cancel-001
+
+### ADMIN: delete the demo catalog product (204; remove stock separately if desired)
+DELETE {{productBaseUrl}}/api/products/{{createProduct.response.body.$.id}}
+Authorization: Bearer {{adminToken}}
+X-Correlation-ID: manual-product-delete-001
+
+### Admin user management: set the newly registered user's role
+# Execute only when the registerUser request above returned 201.
+PATCH {{authBaseUrl}}/api/admin/users/{{registerUser.response.body.$.id}}/role
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+X-Correlation-ID: manual-user-role-001
+
+{
+  "role": "USER"
+}
+
+### Admin user management: disable the newly registered user
+# Execute only when the registerUser request above returned 201.
+PATCH {{authBaseUrl}}/api/admin/users/{{registerUser.response.body.$.id}}/enabled
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+X-Correlation-ID: manual-user-enable-001
+
+{
+  "enabled": false
+}
+
+### Admin user management: delete the newly registered user (204)
+# Execute only when the registerUser request above returned 201.
+DELETE {{authBaseUrl}}/api/admin/users/{{registerUser.response.body.$.id}}
+Authorization: Bearer {{adminToken}}
+X-Correlation-ID: manual-user-delete-001
+
+### ADMIN: inspect circuit breakers
+GET {{orderBaseUrl}}/actuator/circuitbreakers
+Authorization: Bearer {{adminToken}}
+X-Correlation-ID: manual-breakers-001

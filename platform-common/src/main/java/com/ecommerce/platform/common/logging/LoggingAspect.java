@@ -12,10 +12,12 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * Logs operation metadata without serializing method arguments or return values.
@@ -34,24 +36,30 @@ public class LoggingAspect {
         MethodSignature signature = (MethodSignature) joinPoint.getSignature();
         String operation = signature.getDeclaringType().getSimpleName() + "." + signature.getName();
 
-        log.info("operation.started operation={} httpMethod={} path={} user={} correlationId={}",
+        log.info("operation.started operation={} httpMethod={} path={} principal={} actor={} authorities={} correlationId={}",
                 operation,
                 context.httpMethod(),
                 context.path(),
-                context.user(),
+                context.principal(),
+                context.actor(),
+                context.authorities(),
                 context.correlationId());
         try {
             Object result = joinPoint.proceed();
-            log.info("operation.completed operation={} durationMs={} correlationId={}",
+            log.info("operation.completed operation={} durationMs={} principal={} actor={} correlationId={}",
                     operation,
                     elapsedMilliseconds(startedAt),
+                    context.principal(),
+                    context.actor(),
                     context.correlationId());
             return result;
         } catch (Throwable failure) {
-            log.warn("operation.failed operation={} durationMs={} exceptionType={} correlationId={}",
+            log.warn("operation.failed operation={} durationMs={} exceptionType={} principal={} actor={} correlationId={}",
                     operation,
                     elapsedMilliseconds(startedAt),
                     failure.getClass().getName(),
+                    context.principal(),
+                    context.actor(),
                     context.correlationId());
             throw failure;
         }
@@ -67,20 +75,43 @@ public class LoggingAspect {
             request = attributes.getRequest();
         }
 
-        String user = "anonymous";
+        String principal = "anonymous";
+        String actor = "anonymous";
+        String authorities = "-";
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.isAuthenticated()
                 && !"anonymousUser".equals(authentication.getPrincipal())) {
-            user = authentication.getName();
+            principal = authentication.getName();
+            actor = principal;
+            String roleAuthorities = authentication.getAuthorities().stream()
+                    .map(authority -> authority.getAuthority())
+                    .filter(authority -> authority.startsWith("ROLE_"))
+                    .sorted()
+                    .collect(Collectors.joining(","));
+            authorities = roleAuthorities.isBlank() ? "-" : roleAuthorities;
+            if (authentication instanceof JwtAuthenticationToken jwtAuthentication) {
+                Object actorClaim = jwtAuthentication.getToken().getClaims().get("actorSub");
+                if (actorClaim instanceof String delegatedActor && !delegatedActor.isBlank()) {
+                    actor = delegatedActor;
+                }
+            }
         }
 
         return new InvocationContext(
                 request == null ? "-" : request.getMethod(),
                 request == null ? "-" : request.getRequestURI(),
-                user,
+                principal,
+                actor,
+                authorities,
                 request == null ? null : CorrelationIdFilter.currentCorrelationId(request));
     }
 
-    private record InvocationContext(String httpMethod, String path, String user, String correlationId) {
+    private record InvocationContext(
+            String httpMethod,
+            String path,
+            String principal,
+            String actor,
+            String authorities,
+            String correlationId) {
     }
 }

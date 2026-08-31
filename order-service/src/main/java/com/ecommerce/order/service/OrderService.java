@@ -75,7 +75,9 @@ public class OrderService {
 
     @Transactional
     public OrderResponse cancel(long id, String customerIdentity, boolean admin) {
-        var order = requireOrder(id, customerIdentity, admin);
+        // Serialize cancellation for one order so concurrent callers cannot release
+        // the same inventory reservation more than once.
+        var order = requireOrderForUpdate(id, customerIdentity, admin);
         if (order.getStatus() == OrderStatus.CANCELLED) {
             return OrderResponse.from(order);
         }
@@ -94,6 +96,13 @@ public class OrderService {
         var order = admin
                 ? orderRepository.findById(id)
                 : orderRepository.findByIdAndCustomerEmail(id, customerIdentity);
+        return order.orElseThrow(() -> new OrderNotFoundException(id));
+    }
+
+    private PurchaseOrder requireOrderForUpdate(long id, String customerIdentity, boolean admin) {
+        var order = admin
+                ? orderRepository.findByIdForUpdate(id)
+                : orderRepository.findByIdAndCustomerEmailForUpdate(id, customerIdentity);
         return order.orElseThrow(() -> new OrderNotFoundException(id));
     }
 

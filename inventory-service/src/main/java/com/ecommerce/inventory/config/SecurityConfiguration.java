@@ -25,13 +25,14 @@ public class SecurityConfiguration {
     ) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
+                .requestCache(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/actuator/health", "/actuator/info", "/h2-console/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/inventory/**").hasAnyRole("USER", "ADMIN")
-                        .requestMatchers(HttpMethod.POST, "/api/inventory/*/reservations").hasAnyRole("USER", "ADMIN")
-                        .requestMatchers(HttpMethod.DELETE, "/api/inventory/*/reservations").hasAnyRole("USER", "ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/inventory/*/reservations").hasRole("SERVICE")
+                        .requestMatchers(HttpMethod.DELETE, "/api/inventory/*/reservations").hasRole("SERVICE")
+                        .requestMatchers(HttpMethod.GET, "/api/inventory/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/inventory").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/inventory/**").hasRole("ADMIN")
                         .anyRequest().denyAll())
