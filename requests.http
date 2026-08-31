@@ -1,0 +1,47 @@
+### Product catalog
+GET http://localhost:8081/api/products
+
+### Inventory
+GET http://localhost:8082/api/inventory/SKU-LAPTOP
+
+### Place an order (catalog prices are authoritative; inventory is reserved)
+POST http://localhost:8083/api/orders
+Content-Type: application/json
+
+{
+  "customerEmail": "buyer@example.com",
+  "items": [
+    {
+      "sku": "SKU-LAPTOP",
+      "quantity": 1
+    },
+    {
+      "sku": "SKU-HEADPHONES",
+      "quantity": 2
+    }
+  ]
+}
+
+### List orders
+GET http://localhost:8083/api/orders
+
+### Create a product
+POST http://localhost:8081/api/products
+Content-Type: application/json
+
+{
+  "sku": "SKU-KEYBOARD",
+  "name": "Mechanical Keyboard",
+  "description": "Hot-swappable mechanical keyboard",
+  "price": 89.99,
+  "active": true
+}
+
+### Create matching stock
+POST http://localhost:8082/api/inventory
+Content-Type: application/json
+
+{
+  "sku": "SKU-KEYBOARD",
+  "availableQuantity": 25
+}

@@ -1,0 +1,87 @@
+name: ecommerce-poc
+
+x-jwt-environment: &jwt-environment
+  JWT_SECRET: ${JWT_SECRET:-dev-only-ecommerce-jwt-secret-change-before-production-2026}
+  JWT_ISSUER: ${JWT_ISSUER:-ecommerce-auth}
+  JWT_AUDIENCE: ${JWT_AUDIENCE:-ecommerce-api}
+
+services:
+  auth-service:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: auth-service
+    environment:
+      <<: *jwt-environment
+      SERVER_PORT: 8084
+      AUTH_SEED_ENABLED: ${AUTH_SEED_ENABLED:-true}
+      AUTH_ADMIN_EMAIL: ${AUTH_ADMIN_EMAIL:-admin@example.com}
+      AUTH_ADMIN_PASSWORD: ${AUTH_ADMIN_PASSWORD:-ChangeMeAdmin123!}
+      AUTH_USER_EMAIL: ${AUTH_USER_EMAIL:-user@example.com}
+      AUTH_USER_PASSWORD: ${AUTH_USER_PASSWORD:-ChangeMeUser123!}
+    ports:
+      - "8084:8084"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8084/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  product-service:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: product-service
+    environment:
+      <<: *jwt-environment
+      SERVER_PORT: 8081
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8081/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  inventory-service:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: inventory-service
+    environment:
+      <<: *jwt-environment
+      SERVER_PORT: 8082
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8082/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  order-service:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: order-service
+    environment:
+      <<: *jwt-environment
+      SERVER_PORT: 8083
+      CLIENTS_CATALOG_BASE_URL: http://product-service:8081
+      CLIENTS_INVENTORY_BASE_URL: http://inventory-service:8082
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8083/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      product-service:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
