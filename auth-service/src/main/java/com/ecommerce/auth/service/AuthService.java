@@ -1,6 +1,6 @@
 package com.ecommerce.auth.service;
 
-import com.ecommerce.auth.api.TokenResponse;
+import com.ecommerce.auth.models.response.TokenResponse;
 import com.ecommerce.auth.domain.AppUser;
 import com.ecommerce.auth.exception.InvalidCredentialsException;
 import com.ecommerce.auth.repository.AppUserRepository;

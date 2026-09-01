@@ -1,10 +1,10 @@
 package com.ecommerce.productservice.service;
 
-import com.ecommerce.productservice.api.ProductResponse;
-import com.ecommerce.productservice.api.ProductUpsertRequest;
 import com.ecommerce.productservice.domain.Product;
 import com.ecommerce.productservice.exception.DuplicateProductSkuException;
 import com.ecommerce.productservice.exception.ProductNotFoundException;
+import com.ecommerce.productservice.models.request.ProductUpsertRequest;
+import com.ecommerce.productservice.models.response.ProductResponse;
 import com.ecommerce.productservice.repository.ProductRepository;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;

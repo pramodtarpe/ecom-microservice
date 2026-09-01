@@ -1,7 +1,7 @@
 package com.ecommerce.auth.service;
 
-import com.ecommerce.auth.api.UserPageResponse;
-import com.ecommerce.auth.api.UserResponse;
+import com.ecommerce.auth.models.response.UserPageResponse;
+import com.ecommerce.auth.models.response.UserResponse;
 import com.ecommerce.auth.domain.AppUser;
 import com.ecommerce.auth.domain.Role;
 import com.ecommerce.auth.exception.AdminAccessRevokedException;

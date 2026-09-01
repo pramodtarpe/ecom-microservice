@@ -1,13 +1,13 @@
 package com.ecommerce.inventory.service;
 
-import com.ecommerce.inventory.api.CreateInventoryRequest;
-import com.ecommerce.inventory.api.InventoryResponse;
 import com.ecommerce.inventory.domain.InventoryItem;
 import com.ecommerce.inventory.exception.DuplicateSkuException;
 import com.ecommerce.inventory.exception.InsufficientReservedQuantityException;
 import com.ecommerce.inventory.exception.InsufficientStockException;
 import com.ecommerce.inventory.exception.InvalidInventoryRequestException;
 import com.ecommerce.inventory.exception.InventoryNotFoundException;
+import com.ecommerce.inventory.models.request.CreateInventoryRequest;
+import com.ecommerce.inventory.models.response.InventoryResponse;
 import com.ecommerce.inventory.repository.InventoryRepository;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;

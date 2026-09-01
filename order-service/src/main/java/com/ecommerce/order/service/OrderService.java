@@ -1,13 +1,13 @@
 package com.ecommerce.order.service;
 
-import com.ecommerce.order.api.CreateOrderRequest;
-import com.ecommerce.order.api.OrderResponse;
 import com.ecommerce.order.client.CatalogClient;
 import com.ecommerce.order.client.InventoryClient;
 import com.ecommerce.order.domain.OrderStatus;
 import com.ecommerce.order.domain.PurchaseOrder;
 import com.ecommerce.order.error.InvalidOrderRequestException;
 import com.ecommerce.order.error.OrderNotFoundException;
+import com.ecommerce.order.models.request.CreateOrderRequest;
+import com.ecommerce.order.models.response.OrderResponse;
 import com.ecommerce.order.repository.PurchaseOrderRepository;
 import java.math.BigDecimal;
 import java.util.ArrayList;
