@@ -26,16 +26,42 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: order-service-v1
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      ack-mode: record
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_SERVER_URL:http://localhost:8761/eureka/}
+    initial-instance-info-replication-interval-seconds: 5
+  instance:
+    prefer-ip-address: ${EUREKA_PREFER_IP_ADDRESS:true}
 
 clients:
   catalog:
-    base-url: ${CLIENTS_CATALOG_BASE_URL:http://localhost:8081}
+    base-url: ${CLIENTS_CATALOG_BASE_URL:http://product-service}
     connect-timeout: ${CLIENTS_CATALOG_CONNECT_TIMEOUT:500ms}
     read-timeout: ${CLIENTS_CATALOG_READ_TIMEOUT:2s}
-  inventory:
-    base-url: ${CLIENTS_INVENTORY_BASE_URL:http://localhost:8082}
-    connect-timeout: ${CLIENTS_INVENTORY_CONNECT_TIMEOUT:500ms}
-    read-timeout: ${CLIENTS_INVENTORY_READ_TIMEOUT:2s}
+
+messaging:
+  outbox:
+    fixed-delay: ${OUTBOX_FIXED_DELAY:500ms}
+    batch-size: ${OUTBOX_BATCH_SIZE:25}
+    send-timeout: ${OUTBOX_SEND_TIMEOUT:10s}
 
 security:
   jwt:
@@ -60,11 +86,8 @@ resilience4j:
         automatic-transition-from-open-to-half-open-enabled: true
         ignore-exceptions:
           - com.ecommerce.order.error.ProductUnavailableException
-          - com.ecommerce.order.error.InventoryReservationException
     instances:
       catalog:
-        base-config: default
-      inventory:
         base-config: default
   retry:
     instances:
@@ -80,9 +103,6 @@ resilience4j:
   bulkhead:
     instances:
       catalog:
-        max-concurrent-calls: 10
-        max-wait-duration: 0ms
-      inventory:
         max-concurrent-calls: 10
         max-wait-duration: 0ms
 

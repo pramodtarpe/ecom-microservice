@@ -1,20 +1,26 @@
 package com.ecommerce.order.service;
 
 import com.ecommerce.order.client.CatalogClient;
-import com.ecommerce.order.client.InventoryClient;
+import com.ecommerce.events.inventory.InventoryCommandEvent;
+import com.ecommerce.events.inventory.InventoryCommandType;
+import com.ecommerce.events.inventory.InventoryLine;
+import com.ecommerce.events.inventory.InventoryResultEvent;
+import com.ecommerce.events.inventory.InventoryResultType;
 import com.ecommerce.order.domain.OrderStatus;
 import com.ecommerce.order.domain.PurchaseOrder;
 import com.ecommerce.order.error.InvalidOrderRequestException;
 import com.ecommerce.order.error.OrderNotFoundException;
 import com.ecommerce.order.models.request.CreateOrderRequest;
 import com.ecommerce.order.models.response.OrderResponse;
+import com.ecommerce.order.messaging.outbox.InventoryCommandOutbox;
 import com.ecommerce.order.repository.PurchaseOrderRepository;
 import java.math.BigDecimal;
-import java.util.ArrayList;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,39 +29,32 @@ public class OrderService {
 
     private final PurchaseOrderRepository orderRepository;
     private final CatalogClient catalogClient;
-    private final InventoryClient inventoryClient;
+    private final InventoryCommandOutbox inventoryCommandOutbox;
 
     public OrderService(
             PurchaseOrderRepository orderRepository,
             CatalogClient catalogClient,
-            InventoryClient inventoryClient) {
+            InventoryCommandOutbox inventoryCommandOutbox) {
         this.orderRepository = orderRepository;
         this.catalogClient = catalogClient;
-        this.inventoryClient = inventoryClient;
+        this.inventoryCommandOutbox = inventoryCommandOutbox;
     }
 
     @Transactional
-    public OrderResponse create(CreateOrderRequest request, String customerIdentity) {
+    public OrderResponse create(
+            CreateOrderRequest request, String customerIdentity, String correlationId) {
         var quantities = aggregateItems(request.items());
         var prices = new LinkedHashMap<String, BigDecimal>();
 
         // Resolve every server-owned price before creating any inventory side effect.
         quantities.keySet().forEach(sku -> prices.put(sku, catalogClient.priceForSku(sku)));
 
-        var completedReservations = new ArrayList<Reservation>();
-        try {
-            quantities.forEach((sku, quantity) -> {
-                inventoryClient.reserve(sku, quantity);
-                completedReservations.add(new Reservation(sku, quantity));
-            });
-
-            var order = new PurchaseOrder(customerIdentity);
-            quantities.forEach((sku, quantity) -> order.addItem(sku, quantity, prices.get(sku)));
-            return OrderResponse.from(orderRepository.saveAndFlush(order));
-        } catch (RuntimeException failure) {
-            compensateReservations(completedReservations, failure);
-            throw failure;
-        }
+        var order = new PurchaseOrder(customerIdentity);
+        quantities.forEach((sku, quantity) -> order.addItem(sku, quantity, prices.get(sku)));
+        orderRepository.saveAndFlush(order);
+        inventoryCommandOutbox.enqueue(commandFor(
+                order, InventoryCommandType.RESERVE, correlationId));
+        return OrderResponse.from(order);
     }
 
     @Transactional(readOnly = true)
@@ -74,21 +73,37 @@ public class OrderService {
     }
 
     @Transactional
-    public OrderResponse cancel(long id, String customerIdentity, boolean admin) {
-        // Serialize cancellation for one order so concurrent callers cannot release
-        // the same inventory reservation more than once.
+    public OrderResponse cancel(
+            long id, String customerIdentity, boolean admin, String correlationId) {
         var order = requireOrderForUpdate(id, customerIdentity, admin);
-        if (order.getStatus() == OrderStatus.CANCELLED) {
+        if (!order.requestCancellation()) {
             return OrderResponse.from(order);
         }
+        orderRepository.saveAndFlush(order);
+        inventoryCommandOutbox.enqueue(commandFor(
+                order, InventoryCommandType.RELEASE, correlationId));
+        return OrderResponse.from(order);
+    }
 
-        releaseAll(order);
-        order.cancel();
-        try {
-            return OrderResponse.from(orderRepository.saveAndFlush(order));
-        } catch (RuntimeException persistenceFailure) {
-            restoreReservations(order, persistenceFailure);
-            throw persistenceFailure;
+    @Transactional
+    public void applyInventoryResult(InventoryResultEvent event) {
+        var order = orderRepository.findByIdForUpdate(event.orderId()).orElse(null);
+        if (order == null) {
+            return;
+        }
+
+        if (event.type() == InventoryResultType.RESERVED
+                && event.sequence() == 1
+                && order.getStatus() == OrderStatus.PENDING_INVENTORY) {
+            order.confirmInventory();
+        } else if (event.type() == InventoryResultType.REJECTED
+                && event.sequence() == 1
+                && order.getStatus() == OrderStatus.PENDING_INVENTORY) {
+            order.rejectInventory(event.reason());
+        } else if (event.type() == InventoryResultType.RELEASED
+                && event.sequence() == order.getInventorySequence()
+                && order.getStatus() == OrderStatus.CANCELLATION_PENDING) {
+            order.completeCancellation();
         }
     }
 
@@ -121,55 +136,19 @@ public class OrderService {
         return sku.trim().toUpperCase(Locale.ROOT);
     }
 
-    private void compensateReservations(List<Reservation> reservations, RuntimeException originalFailure) {
-        for (int index = reservations.size() - 1; index >= 0; index--) {
-            var reservation = reservations.get(index);
-            try {
-                inventoryClient.release(reservation.sku(), reservation.quantity());
-            } catch (RuntimeException compensationFailure) {
-                originalFailure.addSuppressed(compensationFailure);
-            }
-        }
-    }
-
-    private void releaseAll(PurchaseOrder order) {
-        RuntimeException firstFailure = null;
-        var completedReleases = new ArrayList<Reservation>();
-        for (var item : order.getItems()) {
-            try {
-                inventoryClient.release(item.getSku(), item.getQuantity());
-                completedReleases.add(new Reservation(item.getSku(), item.getQuantity()));
-            } catch (RuntimeException releaseFailure) {
-                if (firstFailure == null) {
-                    firstFailure = releaseFailure;
-                } else {
-                    firstFailure.addSuppressed(releaseFailure);
-                }
-            }
-        }
-        if (firstFailure != null) {
-            restoreReservations(completedReleases, firstFailure);
-            throw firstFailure;
-        }
-    }
-
-    private void restoreReservations(PurchaseOrder order, RuntimeException persistenceFailure) {
-        restoreReservations(order.getItems().stream()
-                .map(item -> new Reservation(item.getSku(), item.getQuantity()))
-                .toList(), persistenceFailure);
-    }
-
-    private void restoreReservations(List<Reservation> reservations, RuntimeException originalFailure) {
-        for (int index = reservations.size() - 1; index >= 0; index--) {
-            var reservation = reservations.get(index);
-            try {
-                inventoryClient.reserve(reservation.sku(), reservation.quantity());
-            } catch (RuntimeException restoreFailure) {
-                originalFailure.addSuppressed(restoreFailure);
-            }
-        }
-    }
-
-    private record Reservation(String sku, int quantity) {
+    private InventoryCommandEvent commandFor(
+            PurchaseOrder order, InventoryCommandType type, String correlationId) {
+        var items = order.getItems().stream()
+                .map(item -> new InventoryLine(item.getSku(), item.getQuantity()))
+                .toList();
+        return new InventoryCommandEvent(
+                UUID.randomUUID(),
+                InventoryCommandEvent.CURRENT_SCHEMA_VERSION,
+                type,
+                Instant.now(),
+                correlationId,
+                order.getId(),
+                order.getInventorySequence(),
+                items);
     }
 }

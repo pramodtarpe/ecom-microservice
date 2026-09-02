@@ -3,7 +3,10 @@ package com.ecommerce.order.controller;
 import com.ecommerce.order.models.request.CreateOrderRequest;
 import com.ecommerce.order.models.response.OrderResponse;
 import com.ecommerce.order.service.OrderService;
+import com.ecommerce.order.domain.OrderStatus;
+import com.ecommerce.platform.common.web.CorrelationIdFilter;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.util.List;
 import java.util.Locale;
@@ -30,9 +33,15 @@ public class OrderController {
     @PostMapping
     public ResponseEntity<OrderResponse> create(
             @Valid @RequestBody CreateOrderRequest request,
-            JwtAuthenticationToken authentication) {
-        var response = orderService.create(request, customerIdentity(authentication));
-        return ResponseEntity.created(URI.create("/api/orders/" + response.id())).body(response);
+            JwtAuthenticationToken authentication,
+            HttpServletRequest httpRequest) {
+        var response = orderService.create(
+                request,
+                customerIdentity(authentication),
+                CorrelationIdFilter.currentCorrelationId(httpRequest));
+        return ResponseEntity.accepted()
+                .location(URI.create("/api/orders/" + response.id()))
+                .body(response);
     }
 
     @GetMapping
@@ -46,8 +55,18 @@ public class OrderController {
     }
 
     @PostMapping("/{id}/cancel")
-    public OrderResponse cancel(@PathVariable long id, JwtAuthenticationToken authentication) {
-        return orderService.cancel(id, customerIdentity(authentication), isAdmin(authentication));
+    public ResponseEntity<OrderResponse> cancel(
+            @PathVariable long id,
+            JwtAuthenticationToken authentication,
+            HttpServletRequest httpRequest) {
+        var response = orderService.cancel(
+                id,
+                customerIdentity(authentication),
+                isAdmin(authentication),
+                CorrelationIdFilter.currentCorrelationId(httpRequest));
+        return response.status() == OrderStatus.CANCELLED
+                ? ResponseEntity.ok(response)
+                : ResponseEntity.accepted().body(response);
     }
 
     private String customerIdentity(JwtAuthenticationToken authentication) {

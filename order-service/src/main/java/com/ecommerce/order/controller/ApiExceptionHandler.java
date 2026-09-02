@@ -2,7 +2,6 @@ package com.ecommerce.order.controller;
 
 import com.ecommerce.order.error.DownstreamServiceException;
 import com.ecommerce.order.error.InvalidOrderRequestException;
-import com.ecommerce.order.error.InventoryReservationException;
 import com.ecommerce.order.error.OrderNotFoundException;
 import com.ecommerce.order.error.ProductUnavailableException;
 import com.ecommerce.platform.common.problem.ProblemDetailsFactory;
@@ -46,17 +45,6 @@ public class ApiExceptionHandler {
                 HttpStatus.UNPROCESSABLE_CONTENT,
                 "product_unavailable",
                 "Product unavailable",
-                exception.getMessage(),
-                request);
-    }
-
-    @ExceptionHandler(InventoryReservationException.class)
-    ResponseEntity<ProblemDetail> handleInventoryConflict(
-            InventoryReservationException exception, HttpServletRequest request) {
-        return response(
-                HttpStatus.CONFLICT,
-                "inventory_reservation_failed",
-                "Inventory reservation failed",
                 exception.getMessage(),
                 request);
     }

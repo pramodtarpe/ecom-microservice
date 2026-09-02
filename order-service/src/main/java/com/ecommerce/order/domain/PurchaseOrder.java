@@ -42,6 +42,12 @@ public class PurchaseOrder {
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal total;
 
+    @Column(name = "status_reason", length = 500)
+    private String statusReason;
+
+    @Column(name = "inventory_sequence", nullable = false)
+    private long inventorySequence;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -56,8 +62,9 @@ public class PurchaseOrder {
 
     public PurchaseOrder(String customerEmail) {
         this.customerEmail = Objects.requireNonNull(customerEmail, "customerEmail");
-        this.status = OrderStatus.CONFIRMED;
+        this.status = OrderStatus.PENDING_INVENTORY;
         this.total = BigDecimal.ZERO.setScale(2);
+        this.inventorySequence = 1;
     }
 
     public void addItem(String sku, int quantity, BigDecimal unitPrice) {
@@ -66,12 +73,43 @@ public class PurchaseOrder {
         total = total.add(item.getLineTotal());
     }
 
-    public boolean cancel() {
-        if (status == OrderStatus.CANCELLED) {
+    public void confirmInventory() {
+        if (status == OrderStatus.PENDING_INVENTORY) {
+            status = OrderStatus.CONFIRMED;
+            statusReason = null;
+        }
+    }
+
+    public void rejectInventory(String reason) {
+        if (status == OrderStatus.PENDING_INVENTORY) {
+            status = OrderStatus.REJECTED;
+            statusReason = normalizeReason(reason);
+        }
+    }
+
+    public boolean requestCancellation() {
+        if (status == OrderStatus.CANCELLED || status == OrderStatus.CANCELLATION_PENDING) {
             return false;
         }
-        status = OrderStatus.CANCELLED;
+        status = OrderStatus.CANCELLATION_PENDING;
+        statusReason = null;
+        inventorySequence = Math.addExact(inventorySequence, 1);
         return true;
+    }
+
+    public void completeCancellation() {
+        if (status == OrderStatus.CANCELLATION_PENDING) {
+            status = OrderStatus.CANCELLED;
+            statusReason = null;
+        }
+    }
+
+    private String normalizeReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return "Inventory rejected the reservation";
+        }
+        var normalized = reason.strip();
+        return normalized.length() <= 500 ? normalized : normalized.substring(0, 500);
     }
 
     @PrePersist
@@ -100,6 +138,14 @@ public class PurchaseOrder {
 
     public BigDecimal getTotal() {
         return total;
+    }
+
+    public String getStatusReason() {
+        return statusReason;
+    }
+
+    public long getInventorySequence() {
+        return inventorySequence;
     }
 
     public Instant getCreatedAt() {

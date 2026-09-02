@@ -1,7 +1,8 @@
-@authBaseUrl = http://localhost:8084
-@productBaseUrl = http://localhost:8081
-@inventoryBaseUrl = http://localhost:8082
-@orderBaseUrl = http://localhost:8083
+@gatewayBaseUrl = http://localhost:8080
+@authBaseUrl = {{gatewayBaseUrl}}
+@productBaseUrl = {{gatewayBaseUrl}}
+@inventoryBaseUrl = {{gatewayBaseUrl}}
+@orderBaseUrl = {{gatewayBaseUrl}}
 @adminEmail = admin@example.com
 @adminPassword = ChangeMeAdmin123!
 @userEmail = user@example.com
@@ -134,7 +135,7 @@ X-Correlation-ID: manual-inventory-update-001
   "availableQuantity": 30
 }
 
-### USER: place an order (identity comes from JWT; catalog prices are authoritative)
+### USER: accept an order asynchronously (202 PENDING_INVENTORY)
 # @name createOrder
 POST {{orderBaseUrl}}/api/orders
 Authorization: Bearer {{userToken}}
@@ -159,7 +160,7 @@ GET {{orderBaseUrl}}/api/orders
 Authorization: Bearer {{userToken}}
 X-Correlation-ID: manual-user-orders-001
 
-### USER: get own order
+### USER: get own order (repeat until CONFIRMED or REJECTED)
 GET {{orderBaseUrl}}/api/orders/{{createOrder.response.body.$.id}}
 Authorization: Bearer {{userToken}}
 X-Correlation-ID: manual-user-order-001
@@ -190,7 +191,7 @@ GET {{orderBaseUrl}}/api/orders/{{createOrderForAdminCancel.response.body.$.id}}
 Authorization: Bearer {{adminToken}}
 X-Correlation-ID: manual-admin-order-001
 
-### ADMIN: cancel another user's order
+### ADMIN: request asynchronous cancellation (202 CANCELLATION_PENDING)
 POST {{orderBaseUrl}}/api/orders/{{createOrderForAdminCancel.response.body.$.id}}/cancel
 Authorization: Bearer {{adminToken}}
 X-Correlation-ID: manual-admin-order-cancel-001
@@ -205,7 +206,7 @@ X-Correlation-ID: manual-validation-001
   "items": []
 }
 
-### USER: cancel own order and release its reservations
+### USER: request cancellation; repeat GET until CANCELLED
 POST {{orderBaseUrl}}/api/orders/{{createOrder.response.body.$.id}}/cancel
 Authorization: Bearer {{userToken}}
 X-Correlation-ID: manual-order-cancel-001
@@ -242,8 +243,3 @@ X-Correlation-ID: manual-user-enable-001
 DELETE {{authBaseUrl}}/api/admin/users/{{registerUser.response.body.$.id}}
 Authorization: Bearer {{adminToken}}
 X-Correlation-ID: manual-user-delete-001
-
-### ADMIN: inspect circuit breakers
-GET {{orderBaseUrl}}/actuator/circuitbreakers
-Authorization: Bearer {{adminToken}}
-X-Correlation-ID: manual-breakers-001

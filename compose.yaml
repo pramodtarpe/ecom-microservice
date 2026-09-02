@@ -5,14 +5,65 @@ x-jwt-environment: &jwt-environment
   JWT_ISSUER: ${JWT_ISSUER:-ecommerce-auth}
   JWT_AUDIENCE: ${JWT_AUDIENCE:-ecommerce-api}
 
+x-eureka-environment: &eureka-environment
+  EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+  EUREKA_PREFER_IP_ADDRESS: "true"
+
+x-kafka-environment: &kafka-environment
+  KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+
 services:
+  eureka-server:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: eureka-server
+    environment:
+      EUREKA_SERVER_PORT: 8761
+      EUREKA_INSTANCE_HOSTNAME: eureka-server
+      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8761/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  kafka:
+    image: apache/kafka:4.1.2
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: CONTROLLER://:9093,PLAINTEXT://:19092,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
   auth-service:
     build:
       context: .
       args:
         SERVICE_NAME: auth-service
     environment:
-      <<: *jwt-environment
+      <<: [*jwt-environment, *eureka-environment]
       SERVER_PORT: 8084
       AUTH_SEED_ENABLED: ${AUTH_SEED_ENABLED:-true}
       AUTH_ADMIN_EMAIL: ${AUTH_ADMIN_EMAIL:-admin@example.com}
@@ -21,14 +72,17 @@ services:
       AUTH_USER_EMAIL: ${AUTH_USER_EMAIL:-user@example.com}
       AUTH_USER_DISPLAY_NAME: ${AUTH_USER_DISPLAY_NAME:-POC User}
       AUTH_USER_PASSWORD: ${AUTH_USER_PASSWORD:-ChangeMeUser123!}
-    ports:
-      - "8084:8084"
+    expose:
+      - "8084"
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8084/actuator/health"]
       interval: 5s
       timeout: 3s
       retries: 20
-      start_period: 10s
+      start_period: 15s
+    depends_on:
+      eureka-server:
+        condition: service_healthy
 
   product-service:
     build:
@@ -36,17 +90,20 @@ services:
       args:
         SERVICE_NAME: product-service
     environment:
-      <<: *jwt-environment
+      <<: [*jwt-environment, *eureka-environment]
       SERVER_PORT: 8081
       PRODUCT_SEED_ENABLED: ${PRODUCT_SEED_ENABLED:-true}
-    ports:
-      - "8081:8081"
+    expose:
+      - "8081"
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8081/actuator/health"]
       interval: 5s
       timeout: 3s
       retries: 20
-      start_period: 10s
+      start_period: 15s
+    depends_on:
+      eureka-server:
+        condition: service_healthy
 
   inventory-service:
     build:
@@ -54,17 +111,22 @@ services:
       args:
         SERVICE_NAME: inventory-service
     environment:
-      <<: *jwt-environment
+      <<: [*jwt-environment, *eureka-environment, *kafka-environment]
       SERVER_PORT: 8082
       INVENTORY_SEED_ENABLED: ${INVENTORY_SEED_ENABLED:-true}
-    ports:
-      - "8082:8082"
+    expose:
+      - "8082"
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8082/actuator/health"]
       interval: 5s
       timeout: 3s
       retries: 20
-      start_period: 10s
+      start_period: 20s
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
 
   order-service:
     build:
@@ -72,20 +134,52 @@ services:
       args:
         SERVICE_NAME: order-service
     environment:
-      <<: *jwt-environment
+      <<: [*jwt-environment, *eureka-environment, *kafka-environment]
       SERVER_PORT: 8083
-      CLIENTS_CATALOG_BASE_URL: http://product-service:8081
-      CLIENTS_INVENTORY_BASE_URL: http://inventory-service:8082
-    ports:
-      - "8083:8083"
+      CLIENTS_CATALOG_BASE_URL: http://product-service
+    expose:
+      - "8083"
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8083/actuator/health"]
       interval: 5s
       timeout: 3s
       retries: 20
-      start_period: 10s
+      start_period: 20s
     depends_on:
+      eureka-server:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
       product-service:
         condition: service_healthy
       inventory-service:
+        condition: service_healthy
+
+  api-gateway:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: api-gateway
+    environment:
+      <<: *eureka-environment
+      GATEWAY_SERVICE_PORT: 8080
+      GATEWAY_CORS_ALLOWED_ORIGIN_PATTERN: ${GATEWAY_CORS_ALLOWED_ORIGIN_PATTERN:-http://localhost:*}
+    ports:
+      - "${GATEWAY_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+      order-service:
         condition: service_healthy

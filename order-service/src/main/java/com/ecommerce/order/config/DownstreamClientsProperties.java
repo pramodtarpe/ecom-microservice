@@ -10,8 +10,7 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties(prefix = "clients")
 public record DownstreamClientsProperties(
-        @Valid @NotNull Service catalog,
-        @Valid @NotNull Service inventory) {
+        @Valid @NotNull Service catalog) {
 
     public record Service(
             @NotNull URI baseUrl,
